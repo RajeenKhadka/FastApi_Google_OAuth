@@ -1,32 +1,22 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-import os
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import RedirectResponse
-from urllib.parse import urlencode
-import httpx
-from jose import jwt
 from dotenv import load_dotenv
 from pathlib import Path
+import os
 
-app = FastAPI()
-
-# Load .env from the root project directory
+# Load .env from the root project directory before importing anything that uses env vars
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-GOOGLE_CLIENT_ID=os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET=os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI=os.getenv("GOOGLE_REDIRECT_URI")
+# Import the OAuth router after .env is loaded
+from .oauth import router as oauth_router
 
-if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI]):
-    raise RuntimeError("Missing required Google OAuth environment variable")
-
-GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/auth"
-GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
-GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v2/userinfo"
+# Create FastAPI app instance
+app = FastAPI()
+# Include OAuth routes (login, callback) from oauth.py
+app.include_router(oauth_router)
 
 # Home page with a link to start Google OAuth login
 @app.get("/", response_class=HTMLResponse)
@@ -36,74 +26,24 @@ async def home():
     <a href="/login">Login with Google</a>
     """
 
-# Redirects user to Google's OAuth 2.0 login page
-@app.get("/login")
-def login():
-    query_params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-        "response_type":"code",
-        "scope": "openid email profile",
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-
-    url = f"{GOOGLE_AUTH_ENDPOINT}?{urlencode(query_params)}"
-    return RedirectResponse(url)
-
-# Handles the OAuth2 callback from Google, exchanges code for token, fetches user info, and redirects to profile
-@app.get("/auth/callback")
-async def auth_callback(request: Request):
-    # Get the authorization code from the query parameters
-    code = request.query_params.get("code")
-    if not code:
-        raise HTTPException(status_code=400, detail="Authorization code not found")
-    
-    # Prepare data for token exchange
-    data={
-        "code": code,
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "redirect_uri": GOOGLE_REDIRECT_URI, 
-        "grant_type": "authorization_code"
-    }
-
-    # Exchange code for access token
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(GOOGLE_TOKEN_ENDPOINT, data=data)
-        token_data = token_response.json()
-        access_token = token_data.get("access_token")
-
-        if not access_token:
-            raise HTTPException(status_code=400, detail="Failed to retrieve access token")
-
-        # Use the access token to get user info from Google
-        headers = {"Authorization": f"Bearer {access_token}"}
-        userinfo_response = await client.get(GOOGLE_USERINFO_ENDPOINT, headers=headers)
-        userinfo = userinfo_response.json()
-
-        # Redirect to profile page with user info as query parameters
-        return RedirectResponse(
-            f"/profile?name={userinfo['name']}&email={userinfo['email']}&picture={userinfo['picture']}"
-        )
-
+# Profile page that displays user info after successful login
 @app.get("/profile", response_class=HTMLResponse)
 async def profile(request: Request):
     user_info = request.query_params
     name = user_info.get("name")
     email = user_info.get("email")
     picture = user_info.get("picture")
-
     return f"""
     <html>
         <head><title>User Profile</title></head>
         <body style='text-align:center; font-family:sans-serif;'>
             <h1>Welcome, {name}!</h1>
-            <img src="{picture}" alt="Profile Picture" width="120"/><br>
+            <img src=\"{picture}\" alt=\"Profile Picture\" width=\"120\"/><br>
             <p>Email: {email}</p>
         </body>
     </html>
     """
 
+# Run the app with Uvicorn if this file is executed directly
 if __name__ == "__main__":
-    uvicorn.run(app,host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
