@@ -9,8 +9,9 @@ from pathlib import Path
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Import OAuth routes
-from .auth.oauth import router as oauth_router
+# Import OAuth and Chat routes
+from src.auth.oauth import router as oauth_router
+from src.chat.routes import router as chat_router
 
 # Create app
 app = FastAPI()
@@ -24,20 +25,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add OAuth routes
+# Add OAuth and Chat routes
 app.include_router(oauth_router)
+app.include_router(chat_router)
 
 
 @app.get("/")
 async def home():
     # API info
     return {
-        "message": "FastAPI Google OAuth2 API",
+        "message": "FastAPI Google OAuth2 API with AI Chat",
         "endpoints": {
             "login": "/login",
             "callback": "/auth/callback",
             "user_info": "/auth/me",
-            "logout": "/auth/logout"
+            "logout": "/auth/logout",
+            "chat": "/chat",
+            "reset_chat": "/chat/reset"
         }
     }
 
